@@ -88,6 +88,11 @@ class TruegateProvider
             $fieldsForSign = $body;
         }
         $body['signature'] = $this->signRequest($fieldsForSign);
+
+        $body['metadata'] = empty($body['metadata'])
+            ? new \stdClass()
+            : (object) $body['metadata'];
+
         $response = $this->httpClient->request($method, $path, [
             'headers' =>
                 [
