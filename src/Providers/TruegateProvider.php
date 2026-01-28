@@ -48,7 +48,7 @@ class TruegateProvider
     }
 
     public function oneTimePayment(array $params) {
-        return $this->makeRequest('POST', 'one-time-payments/create', $params, ['metadata', 'customerIp']);
+        return $this->makeRequest('POST', 'one-time-payments/create', $params, ['metadata', 'externalUserId', 'customerIp']);
     }
 
     public function oneTimePaymentWithExternalUserId(array $params) {
