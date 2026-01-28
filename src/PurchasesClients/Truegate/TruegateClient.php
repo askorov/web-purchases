@@ -255,7 +255,7 @@ class TruegateClient extends PurchasesClient
         string $amount,
         string $currency,
         string $idfm,
-        //string $subscriptionId,
+        string $subscriptionId,
         string $description,
         ?string $customerIp,
         array $metadata = []
@@ -264,7 +264,7 @@ class TruegateClient extends PurchasesClient
             'transactionId' => $transactionId,
             'projectId'=> $this->projectId,
             'externalUserId' => $idfm,
-            //'subscriptionId' => $subscriptionId,
+            'subscriptionId' => $subscriptionId,
             'amount' => $amount,
             'currency' => $currency,
             'description' => $description,
