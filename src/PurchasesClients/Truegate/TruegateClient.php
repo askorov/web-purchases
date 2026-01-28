@@ -224,8 +224,15 @@ class TruegateClient extends PurchasesClient
         return $this->getProvider()->startSubscription($params);
     }
 
-    public function startOneTimePayment(string $amount, string $currency, string $idfm, string $email, string $merchantName, array $metadata = [])
-    {
+    public function startOneTimePayment(
+        string $amount,
+        string $currency,
+        string $idfm,
+        string $email,
+        string $merchantName,
+        ?string $customerIp = null,
+        array $metadata = []
+    ) {
         $params = [
             'projectId' => $this->projectId,
             'externalUserId' => $idfm,
@@ -235,11 +242,23 @@ class TruegateClient extends PurchasesClient
             'customPaymentDescriptor' => $merchantName,
             'metadata' => $metadata
         ];
+
+        if ($customerIp) {
+            $params['customerIp'] = $customerIp;
+        }
+
         return $this->getProvider()->startOneTimePayment($params);
     }
 
-    public function oneTimePayment(string $transactionId, string $amount, string $currency, string $subscriptionId, string $description, array $metadata = [])
-    {
+    public function oneTimePayment(
+        string $transactionId,
+        string $amount,
+        string $currency,
+        string $subscriptionId,
+        string $description,
+        ?string $customerIp = null,
+        array $metadata = []
+    ) {
         $params = [
             'transactionId' => $transactionId,
             'projectId'=> $this->projectId,
@@ -249,6 +268,11 @@ class TruegateClient extends PurchasesClient
             'description' => $description,
             'metadata' => $metadata
         ];
+
+        if ($customerIp) {
+            $params['customerIp'] = $customerIp;
+        }
+
         return $this->getProvider()->oneTimePayment($params);
     }
 
