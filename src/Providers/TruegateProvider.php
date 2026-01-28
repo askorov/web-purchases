@@ -44,11 +44,11 @@ class TruegateProvider
     }
 
     public function startOneTimePayment(array $params) {
-        return $this->makeRequest('POST', 'pay/start', $params, ['metadata', 'customPaymentDescriptor']);
+        return $this->makeRequest('POST', 'pay/start', $params, ['metadata', 'customPaymentDescriptor', 'customerIp']);
     }
 
     public function oneTimePayment(array $params) {
-        return $this->makeRequest('POST', 'one-time-payments/create', $params, ['metadata']);
+        return $this->makeRequest('POST', 'one-time-payments/create', $params, ['metadata', 'customerIp']);
     }
 
     public function oneTimePaymentWithExternalUserId(array $params) {
