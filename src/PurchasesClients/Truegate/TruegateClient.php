@@ -230,7 +230,7 @@ class TruegateClient extends PurchasesClient
         string $idfm,
         string $email,
         string $merchantName,
-        ?string $customerIp = null,
+        ?string $customerIp,
         array $metadata = []
     ) {
         $params = [
@@ -256,7 +256,7 @@ class TruegateClient extends PurchasesClient
         string $currency,
         string $subscriptionId,
         string $description,
-        ?string $customerIp = null,
+        ?string $customerIp,
         array $metadata = []
     ) {
         $params = [
