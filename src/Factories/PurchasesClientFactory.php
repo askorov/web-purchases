@@ -44,6 +44,10 @@ class PurchasesClientFactory
                     throw new InvalidArgumentException('Required parameters for recurly client was not provided.');
                 }
                 $client = new RecurlyClient($config['public_key'], $config['secret_key'], $config['region'] ?? null);
+
+                if (!empty($config['countries']) && is_array($config['countries'])) {
+                    $client->setVatCountries($config['countries']);
+                }
                 break;
 
             case PurchasesClient::PAYMENT_SERVICE_PAYPAL:

@@ -9,7 +9,10 @@ use Recurly\Resources\Plan;
 use Wowmaking\WebPurchases\PurchasesClients\PurchasesClient;
 use Wowmaking\WebPurchases\Resources\Entities\Customer;
 use Wowmaking\WebPurchases\Resources\Entities\Price;
+use Wowmaking\WebPurchases\Resources\Entities\PriceCurrency;
 use Wowmaking\WebPurchases\Resources\Entities\Subscription;
+use Wowmaking\WebPurchases\Services\CountryCodeConverterService;
+use Wowmaking\WebPurchases\Services\VatRates;
 
 class RecurlyClient extends PurchasesClient
 {
@@ -20,11 +23,36 @@ class RecurlyClient extends PurchasesClient
 
     protected $region;
 
+    /**
+     * ISO 3166-1 alpha-2 country codes for which VAT-inclusive prices should be generated.
+     *
+     * @var string[]
+     */
+    private array $vatCountries = [];
+
     public function __construct(string $publicKey, string $secretKey, ?string $region = null)
     {
         $this->publicKey = $publicKey;
         $this->region = $region;
         parent::__construct($secretKey);
+    }
+
+    /**
+     * Set country codes (alpha-2) for which VAT-inclusive prices will be generated in getPrices().
+     *
+     * @param string[] $countries e.g. ['DE', 'PL', 'SE']
+     */
+    public function setVatCountries(array $countries): void
+    {
+        $this->vatCountries = array_map('strtoupper', $countries);
+    }
+
+    /**
+     * @return string[]
+     */
+    public function getVatCountries(): array
+    {
+        return $this->vatCountries;
     }
 
     public function isSupportsCustomers(): bool
@@ -85,10 +113,57 @@ class RecurlyClient extends PurchasesClient
             $price->setTrialPriceAmount($item->getCurrencies()[0]->getSetupFee());
             $price->setPeriod($item->getIntervalLength(), $item->getIntervalUnit());
 
+            $this->appendVatPriceCurrencies($price, $item);
+
             $prices[] = $price;
         }
 
         return $prices;
+    }
+
+    /**
+     * Generate PriceCurrency entries for each configured VAT country.
+     *
+     * For taxable plans: amount = base price + VAT.
+     * Country codes are stored as alpha-3 (consistent with truegate/solidgate).
+     */
+    private function appendVatPriceCurrencies(Price $price, Plan $plan): void
+    {
+        if (empty($this->vatCountries)) {
+            return;
+        }
+
+        // Only generate VAT prices for taxable plans
+        if ($plan->getTaxExempt() === true) {
+            return;
+        }
+
+        $baseAmount = (float) $price->getAmount();
+        $baseCurrency = $price->getCurrency();
+        $trialAmount = (float) $price->getTrialPriceAmount();
+
+        foreach ($this->vatCountries as $alpha2Code) {
+            $totalAmount = VatRates::addVat($baseAmount, $alpha2Code);
+
+            if ($totalAmount === null) {
+                continue;
+            }
+
+            $alpha3Code = CountryCodeConverterService::alpha2ToAlpha3($alpha2Code);
+
+            $priceCurrency = new PriceCurrency();
+            $priceCurrency->setId($price->getId() . '-' . strtolower($alpha2Code));
+            $priceCurrency->setAmount($totalAmount);
+            $priceCurrency->setCurrency($baseCurrency);
+            $priceCurrency->setCountry($alpha3Code);
+
+            if ($trialAmount > 0) {
+                $trialWithVat = VatRates::addVat($trialAmount, $alpha2Code);
+                $priceCurrency->setTrialPriceAmount($trialWithVat);
+            }
+
+            $price->addCurrency($priceCurrency);
+        }
     }
 
     /**
