@@ -7,13 +7,13 @@ use Recurly\Client as Provider;
 use Recurly\Errors\NotFound;
 use Recurly\Resources\Item;
 use Recurly\Resources\Plan;
-use Throwable;
 use Wowmaking\WebPurchases\PurchasesClients\PurchasesClient;
 use Wowmaking\WebPurchases\Resources\Entities\Customer;
 use Wowmaking\WebPurchases\Resources\Entities\Price;
 use Wowmaking\WebPurchases\Resources\Entities\PriceCurrency;
 use Wowmaking\WebPurchases\Resources\Entities\Subscription;
 use Wowmaking\WebPurchases\Services\CountryCodeConverterService;
+use Wowmaking\WebPurchases\Services\VatRates;
 
 class RecurlyClient extends PurchasesClient
 {
@@ -159,10 +159,6 @@ class RecurlyClient extends PurchasesClient
         }
     }
 
-    /**
-     * For each configured VAT country, call previewPurchase with the actual product
-     * to get exact tax from Recurly. Stores results as PriceCurrency (alpha-3 codes).
-     */
     private function appendVatPriceCurrencies(Price $price): void
     {
         $baseCurrency = $price->getCurrency();
@@ -170,72 +166,25 @@ class RecurlyClient extends PurchasesClient
         $trialAmount = (float) $price->getTrialPriceAmount();
 
         foreach ($this->vatCountries as $alpha2Code) {
-            try {
-                $accountCode = 'vat-' . substr(md5($price->getId()), 0, 12) . '-' . strtolower($alpha2Code);
-                $purchaseBody = [
-                    'currency' => $baseCurrency,
-                    'account' => [
-                        'code' => $accountCode,
-                        'address' => [
-                            'country' => $alpha2Code,
-                        ],
-                    ],
-                ];
+            $totalAmount = VatRates::addVat($baseAmount, $alpha2Code);
 
-                if ($price->getType() === Price::TYPE_SUBSCRIPTION) {
-                    $purchaseBody['subscriptions'] = [
-                        ['plan_code' => $price->getId()],
-                    ];
-                } else {
-                    $purchaseBody['line_items'] = [
-                        [
-                            'item_code' => $price->getId(),
-                            'type' => 'charge',
-                            'quantity' => 1,
-                        ],
-                    ];
-                }
-
-                $preview = $this->getProvider()->previewPurchase($purchaseBody);
-                $invoice = $preview->getChargeInvoice();
-
-                if (!$invoice || $invoice->getTax() === null || $invoice->getTax() <= 0) {
-                    continue;
-                }
-
-                $taxInfo = $invoice->getTaxInfo();
-                $rate = $taxInfo ? $taxInfo->getRate() : null;
-
-                if ($rate === null || $rate <= 0) {
-                    $subtotal = $invoice->getSubtotal();
-                    $rate = $subtotal > 0 ? $invoice->getTax() / $subtotal : 0;
-                }
-
-                if ($rate <= 0) {
-                    continue;
-                }
-
-                $alpha3Code = CountryCodeConverterService::alpha2ToAlpha3($alpha2Code);
-
-                $priceCurrency = new PriceCurrency();
-                $priceCurrency->setId($price->getId() . '-' . strtolower($alpha2Code));
-                $priceCurrency->setAmount(round($baseAmount * (1 + $rate), 2));
-                $priceCurrency->setCurrency($baseCurrency);
-                $priceCurrency->setCountry($alpha3Code);
-
-                if ($trialAmount > 0) {
-                    $priceCurrency->setTrialPriceAmount(round($trialAmount * (1 + $rate), 2));
-                }
-
-                $price->addCurrency($priceCurrency);
-            } catch (Throwable $e) {
-                error_log(sprintf(
-                    'RecurlyClient::appendVatPriceCurrencies failed for product=%s country=%s: %s',
-                    $price->getId(),
-                    $alpha2Code,
-                    $e->getMessage()
-                ));
+            if ($totalAmount === null) {
+                continue;
             }
+
+            $alpha3Code = CountryCodeConverterService::alpha2ToAlpha3($alpha2Code);
+
+            $priceCurrency = new PriceCurrency();
+            $priceCurrency->setId($price->getId() . '-' . strtolower($alpha2Code));
+            $priceCurrency->setAmount($totalAmount);
+            $priceCurrency->setCurrency($baseCurrency);
+            $priceCurrency->setCountry($alpha3Code);
+
+            if ($trialAmount > 0) {
+                $priceCurrency->setTrialPriceAmount(VatRates::addVat($trialAmount, $alpha2Code));
+            }
+
+            $price->addCurrency($priceCurrency);
         }
     }
 
