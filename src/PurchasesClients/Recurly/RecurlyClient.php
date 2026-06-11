@@ -171,14 +171,13 @@ class RecurlyClient extends PurchasesClient
 
         foreach ($this->vatCountries as $alpha2Code) {
             try {
+                $accountCode = 'vat-' . substr(md5($price->getId()), 0, 12) . '-' . strtolower($alpha2Code);
                 $purchaseBody = [
                     'currency' => $baseCurrency,
                     'account' => [
-                        'code' => 'vat-preview-' . $price->getId() . '-' . strtolower($alpha2Code),
-                        'billing_info' => [
-                            'address' => [
-                                'country' => $alpha2Code,
-                            ],
+                        'code' => $accountCode,
+                        'address' => [
+                            'country' => $alpha2Code,
                         ],
                     ],
                 ];
@@ -230,7 +229,12 @@ class RecurlyClient extends PurchasesClient
 
                 $price->addCurrency($priceCurrency);
             } catch (Throwable $e) {
-                // Product not taxable or country not configured — skip
+                error_log(sprintf(
+                    'RecurlyClient::appendVatPriceCurrencies failed for product=%s country=%s: %s',
+                    $price->getId(),
+                    $alpha2Code,
+                    $e->getMessage()
+                ));
             }
         }
     }
