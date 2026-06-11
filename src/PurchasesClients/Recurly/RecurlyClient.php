@@ -7,13 +7,13 @@ use Recurly\Client as Provider;
 use Recurly\Errors\NotFound;
 use Recurly\Resources\Item;
 use Recurly\Resources\Plan;
+use Throwable;
 use Wowmaking\WebPurchases\PurchasesClients\PurchasesClient;
 use Wowmaking\WebPurchases\Resources\Entities\Customer;
 use Wowmaking\WebPurchases\Resources\Entities\Price;
 use Wowmaking\WebPurchases\Resources\Entities\PriceCurrency;
 use Wowmaking\WebPurchases\Resources\Entities\Subscription;
 use Wowmaking\WebPurchases\Services\CountryCodeConverterService;
-use Wowmaking\WebPurchases\Services\VatRates;
 
 class RecurlyClient extends PurchasesClient
 {
@@ -91,6 +91,12 @@ class RecurlyClient extends PurchasesClient
         $this->collectPlanPrices($prices, $pricesIds);
         $this->collectItemPrices($prices, $pricesIds);
 
+        if (!empty($this->vatCountries)) {
+            foreach ($prices as $price) {
+                $this->appendVatPriceCurrencies($price);
+            }
+        }
+
         return $prices;
     }
 
@@ -121,8 +127,6 @@ class RecurlyClient extends PurchasesClient
             $price->setTrialPriceAmount($plan->getCurrencies()[0]->getSetupFee());
             $price->setPeriod($plan->getIntervalLength(), $plan->getIntervalUnit());
 
-            $this->appendVatPriceCurrencies($price, $plan->getTaxExempt());
-
             $prices[] = $price;
         }
     }
@@ -151,51 +155,83 @@ class RecurlyClient extends PurchasesClient
             $price->setAmount($item->getCurrencies()[0]->getUnitAmount());
             $price->setCurrency($item->getCurrencies()[0]->getCurrency());
 
-            $this->appendVatPriceCurrencies($price, $item->getTaxExempt());
-
             $prices[] = $price;
         }
     }
 
     /**
-     * Generate PriceCurrency entries for each configured VAT country.
-     * Country codes are stored as alpha-3 (consistent with truegate/solidgate).
+     * For each configured VAT country, call previewPurchase with the actual product
+     * to get exact tax from Recurly. Stores results as PriceCurrency (alpha-3 codes).
      */
-    private function appendVatPriceCurrencies(Price $price, ?bool $taxExempt): void
+    private function appendVatPriceCurrencies(Price $price): void
     {
-        if (empty($this->vatCountries)) {
-            return;
-        }
-
-        if ($taxExempt === true) {
-            return;
-        }
-
-        $baseAmount = (float) $price->getAmount();
         $baseCurrency = $price->getCurrency();
+        $baseAmount = (float) $price->getAmount();
         $trialAmount = (float) $price->getTrialPriceAmount();
 
         foreach ($this->vatCountries as $alpha2Code) {
-            $totalAmount = VatRates::addVat($baseAmount, $alpha2Code);
+            try {
+                $purchaseBody = [
+                    'currency' => $baseCurrency,
+                    'account' => [
+                        'code' => 'vat-preview-' . $price->getId() . '-' . strtolower($alpha2Code),
+                        'billing_info' => [
+                            'address' => [
+                                'country' => $alpha2Code,
+                            ],
+                        ],
+                    ],
+                ];
 
-            if ($totalAmount === null) {
-                continue;
+                if ($price->getType() === Price::TYPE_SUBSCRIPTION) {
+                    $purchaseBody['subscriptions'] = [
+                        ['plan_code' => $price->getId()],
+                    ];
+                } else {
+                    $purchaseBody['line_items'] = [
+                        [
+                            'item_code' => $price->getId(),
+                            'type' => 'charge',
+                            'quantity' => 1,
+                        ],
+                    ];
+                }
+
+                $preview = $this->getProvider()->previewPurchase($purchaseBody);
+                $invoice = $preview->getChargeInvoice();
+
+                if (!$invoice || $invoice->getTax() === null || $invoice->getTax() <= 0) {
+                    continue;
+                }
+
+                $taxInfo = $invoice->getTaxInfo();
+                $rate = $taxInfo ? $taxInfo->getRate() : null;
+
+                if ($rate === null || $rate <= 0) {
+                    $subtotal = $invoice->getSubtotal();
+                    $rate = $subtotal > 0 ? $invoice->getTax() / $subtotal : 0;
+                }
+
+                if ($rate <= 0) {
+                    continue;
+                }
+
+                $alpha3Code = CountryCodeConverterService::alpha2ToAlpha3($alpha2Code);
+
+                $priceCurrency = new PriceCurrency();
+                $priceCurrency->setId($price->getId() . '-' . strtolower($alpha2Code));
+                $priceCurrency->setAmount(round($baseAmount * (1 + $rate), 2));
+                $priceCurrency->setCurrency($baseCurrency);
+                $priceCurrency->setCountry($alpha3Code);
+
+                if ($trialAmount > 0) {
+                    $priceCurrency->setTrialPriceAmount(round($trialAmount * (1 + $rate), 2));
+                }
+
+                $price->addCurrency($priceCurrency);
+            } catch (Throwable $e) {
+                // Product not taxable or country not configured — skip
             }
-
-            $alpha3Code = CountryCodeConverterService::alpha2ToAlpha3($alpha2Code);
-
-            $priceCurrency = new PriceCurrency();
-            $priceCurrency->setId($price->getId() . '-' . strtolower($alpha2Code));
-            $priceCurrency->setAmount($totalAmount);
-            $priceCurrency->setCurrency($baseCurrency);
-            $priceCurrency->setCountry($alpha3Code);
-
-            if ($trialAmount > 0) {
-                $trialWithVat = VatRates::addVat($trialAmount, $alpha2Code);
-                $priceCurrency->setTrialPriceAmount($trialWithVat);
-            }
-
-            $price->addCurrency($priceCurrency);
         }
     }
 
