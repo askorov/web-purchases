@@ -5,6 +5,7 @@ namespace Wowmaking\WebPurchases\PurchasesClients\Recurly;
 use Recurly\Client;
 use Recurly\Client as Provider;
 use Recurly\Errors\NotFound;
+use Recurly\Resources\Item;
 use Recurly\Resources\Plan;
 use Wowmaking\WebPurchases\PurchasesClients\PurchasesClient;
 use Wowmaking\WebPurchases\Resources\Entities\Customer;
@@ -85,17 +86,57 @@ class RecurlyClient extends PurchasesClient
      */
     public function getPrices(array $pricesIds = []): array
     {
+        $prices = [];
+
+        $this->collectPlanPrices($prices, $pricesIds);
+        $this->collectItemPrices($prices, $pricesIds);
+
+        return $prices;
+    }
+
+    private function collectPlanPrices(array &$prices, array $pricesIds): void
+    {
         $response = $this->getProvider()->listPlans([
             'params' => [
                 'state' => 'active'
             ]
         ]);
 
-        $prices = [];
+        /** @var Plan $plan */
+        foreach ($response as $plan) {
+            if (!isset($plan->getCurrencies()[0])) {
+                continue;
+            }
 
-        /** @var Plan $item */
+            if (count($pricesIds) && !in_array($plan->getCode(), $pricesIds)) {
+                continue;
+            }
+
+            $price = new Price();
+            $price->setId($plan->getCode());
+            $price->setType(Price::TYPE_SUBSCRIPTION);
+            $price->setAmount($plan->getCurrencies()[0]->getUnitAmount());
+            $price->setCurrency($plan->getCurrencies()[0]->getCurrency());
+            $price->setTrialPeriodDays($plan->getTrialLength());
+            $price->setTrialPriceAmount($plan->getCurrencies()[0]->getSetupFee());
+            $price->setPeriod($plan->getIntervalLength(), $plan->getIntervalUnit());
+
+            $this->appendVatPriceCurrencies($price, $plan->getTaxExempt());
+
+            $prices[] = $price;
+        }
+    }
+
+    private function collectItemPrices(array &$prices, array $pricesIds): void
+    {
+        $response = $this->getProvider()->listItems([
+            'params' => [
+                'state' => 'active'
+            ]
+        ]);
+
+        /** @var Item $item */
         foreach ($response as $item) {
-
             if (!isset($item->getCurrencies()[0])) {
                 continue;
             }
@@ -106,35 +147,27 @@ class RecurlyClient extends PurchasesClient
 
             $price = new Price();
             $price->setId($item->getCode());
-            $price->setType(Price::TYPE_SUBSCRIPTION);
+            $price->setType(Price::TYPE_ONE_TIME);
             $price->setAmount($item->getCurrencies()[0]->getUnitAmount());
             $price->setCurrency($item->getCurrencies()[0]->getCurrency());
-            $price->setTrialPeriodDays($item->getTrialLength());
-            $price->setTrialPriceAmount($item->getCurrencies()[0]->getSetupFee());
-            $price->setPeriod($item->getIntervalLength(), $item->getIntervalUnit());
 
-            $this->appendVatPriceCurrencies($price, $item);
+            $this->appendVatPriceCurrencies($price, $item->getTaxExempt());
 
             $prices[] = $price;
         }
-
-        return $prices;
     }
 
     /**
      * Generate PriceCurrency entries for each configured VAT country.
-     *
-     * For taxable plans: amount = base price + VAT.
      * Country codes are stored as alpha-3 (consistent with truegate/solidgate).
      */
-    private function appendVatPriceCurrencies(Price $price, Plan $plan): void
+    private function appendVatPriceCurrencies(Price $price, ?bool $taxExempt): void
     {
         if (empty($this->vatCountries)) {
             return;
         }
 
-        // Only generate VAT prices for taxable plans
-        if ($plan->getTaxExempt() === true) {
+        if ($taxExempt === true) {
             return;
         }
 
