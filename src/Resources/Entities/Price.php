@@ -30,6 +30,8 @@ class Price implements ResourcesEntityInterface
 
     public $product_name;
 
+    /** @var bool */
+    public $tax_exempt = false;
 
     public $currencies =[];
 
@@ -121,6 +123,16 @@ class Price implements ResourcesEntityInterface
     public function setTrialPriceAmount($trial_price_amount): void
     {
         $this->trial_price_amount = $trial_price_amount;
+    }
+
+    public function isTaxExempt(): bool
+    {
+        return $this->tax_exempt;
+    }
+
+    public function setTaxExempt(bool $taxExempt): void
+    {
+        $this->tax_exempt = $taxExempt;
     }
 
     public function addCurrency($productData) {

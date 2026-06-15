@@ -93,7 +93,9 @@ class RecurlyClient extends PurchasesClient
 
         if (!empty($this->vatCountries)) {
             foreach ($prices as $price) {
-                $this->appendVatPriceCurrencies($price);
+                if (!$price->isTaxExempt()) {
+                    $this->appendVatPriceCurrencies($price);
+                }
             }
         }
 
@@ -126,6 +128,7 @@ class RecurlyClient extends PurchasesClient
             $price->setTrialPeriodDays($plan->getTrialLength());
             $price->setTrialPriceAmount($plan->getCurrencies()[0]->getSetupFee());
             $price->setPeriod($plan->getIntervalLength(), $plan->getIntervalUnit());
+            $price->setTaxExempt((bool) $plan->getTaxExempt());
 
             $prices[] = $price;
         }
@@ -154,6 +157,7 @@ class RecurlyClient extends PurchasesClient
             $price->setType(Price::TYPE_ONE_TIME);
             $price->setAmount($item->getCurrencies()[0]->getUnitAmount());
             $price->setCurrency($item->getCurrencies()[0]->getCurrency());
+            $price->setTaxExempt((bool) $item->getTaxExempt());
 
             $prices[] = $price;
         }
